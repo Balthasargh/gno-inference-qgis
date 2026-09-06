@@ -1,0 +1,23 @@
+[general]
+name=GNO Inference
+qgisMinimumVersion=3.16
+description=Inférence de modèles Graph Neural Operator (GNO) sur données géospatiales (raster / nuages de points) directement dans QGIS.
+version=0.5.0
+author=Btarse
+email=btarse@example.com
+
+about=Ce plugin encapsule un modèle Graph Neural Operator (GNO / GINO, via la librairie neuraloperator) pré-entraîné en PyTorch. Il est exposé de quatre façons : un algorithme de la boîte à outils de Traitement (Processing) pour l'inférence, un second algorithme Processing pour l'entraînement à partir de paires de rasters alignés, un panneau dockable interactif pour l'inférence (avec accès à un Model Zoo pour télécharger des modèles pré-entraînés), et un registre JSON extensible pour publier ses propres modèles. L'entrée d'inférence -- un raster (DEM, imagerie...) OU un nuage de points LAS/LAZ -- est convertie en nuage de points, découpée en tuiles avec recouvrement (bandes de lignes pour un raster, grille spatiale 2D générique pour un nuage de points), chaque tuile reconstruit son propre graphe de voisinage (k-NN) pour l'inférence (CPU ou GPU), puis le résultat est réécrit en raster GeoTIFF géoréférencé ou en LAS/LAZ (nouvelle dimension de prédiction).
+
+tracker=https://github.com/btarse/qgis-gno-plugin/issues
+repository=https://github.com/btarse/qgis-gno-plugin
+homepage=https://github.com/btarse/qgis-gno-plugin
+
+tags=deep learning,machine learning,pytorch,graph neural network,neural operator,GNO,GINO,raster,point cloud,LAS,LAZ,lidar,inference,IA
+
+category=Analysis
+icon=resources/icon.png
+experimental=True
+deprecated=False
+server=False
+
+hasProcessingProvider=yes
