@@ -8,7 +8,6 @@ Communication par callbacks simples, sans dépendance Qt / Processing.
 
 from __future__ import annotations
 
-import os
 from typing import Callable, Optional
 
 import numpy as np
@@ -16,6 +15,12 @@ import torch
 
 from ..utils import data_preparation as dp
 from ..utils.export_results import write_las_predictions, write_raster_predictions
+from ..utils.file_filters import (
+    detect_input_type,
+    validate_input_path,
+    validate_model_file,
+    validate_output_path,
+)
 from ..utils.model_loader import load_model, resolve_device
 
 
@@ -45,9 +50,30 @@ class GNOInferenceEngine:
         self._norm = None
 
     def run(self, input_path: str, output_path: str, las_dimension: str = "z") -> str:
-        ext = os.path.splitext(input_path)[1].lower()
-        if ext in (".las", ".laz"):
+        # Validation modèle
+        err = validate_model_file(self.model_path)
+        if err:
+            raise ValueError(err)
+
+        # Détection / validation du type d'entrée
+        err, kind = validate_input_path(input_path)
+        if err:
+            # Fallback : si le fichier existe mais extension inconnue,
+            # on tente raster (cas URI QGIS / VRT sans extension claire)
+            detected = detect_input_type(input_path)
+            if detected == "unknown":
+                raise ValueError(err)
+            kind = detected
+
+        if kind == "pointcloud":
+            err, output_path = validate_output_path(output_path, "pointcloud")
+            if err:
+                raise ValueError(err)
             return self._run_pointcloud(input_path, output_path, las_dimension)
+
+        err, output_path = validate_output_path(output_path, "raster")
+        if err:
+            raise ValueError(err)
         return self._run_raster(input_path, output_path)
 
     def _run_raster(self, input_path: str, output_path: str) -> str:
@@ -57,9 +83,11 @@ class GNOInferenceEngine:
         cloud.values = self._norm.normalize(cloud.values)
         n = len(cloud.values)
         predictions = np.full(n, np.nan, dtype=np.float32)
-        self.message_cb("Chargement du modèle…")
+        self.message_cb("Chargement du modèle\u2026")
         self._load_model()
-        tiles = list(dp.iter_row_tiles(cloud, meta, core_rows=max(16, self.batch_size // 64)))
+        tiles = list(
+            dp.iter_row_tiles(cloud, meta, core_rows=max(16, self.batch_size // 64))
+        )
         self.message_cb(f"{len(tiles)} tuile(s) à traiter ({n} points).")
         self._infer_on_tiles(tiles, predictions)
         if self.is_canceled_cb():
@@ -70,23 +98,29 @@ class GNOInferenceEngine:
         self.progress_cb(100.0)
         return output_path
 
-    def _run_pointcloud(self, input_path: str, output_path: str, dimension: str = "z") -> str:
+    def _run_pointcloud(
+        self, input_path: str, output_path: str, dimension: str = "z"
+    ) -> str:
         self.message_cb(f"Lecture du nuage de points : {input_path}")
         cloud, las = dp.read_las_as_points(input_path, dimension=dimension)
         self._setup_norm(cloud.values)
         cloud.values = self._norm.normalize(cloud.values)
         n = len(cloud.values)
         predictions = np.full(n, np.nan, dtype=np.float32)
-        self.message_cb("Chargement du modèle…")
+        self.message_cb("Chargement du modèle\u2026")
         self._load_model()
-        tiles = list(dp.iter_spatial_tiles(cloud, target_points_per_tile=self.batch_size))
+        tiles = list(
+            dp.iter_spatial_tiles(cloud, target_points_per_tile=self.batch_size)
+        )
         self.message_cb(f"{len(tiles)} tuile(s) à traiter ({n} points).")
         self._infer_on_tiles(tiles, predictions)
         if self.is_canceled_cb():
             raise InterruptedError("Inférence annulée.")
         out_values = self._norm.denormalize(predictions)
         self.message_cb(f"Écriture du nuage de points de sortie : {output_path}")
-        write_las_predictions(output_path, out_values, las, valid_mask=cloud.nodata_mask)
+        write_las_predictions(
+            output_path, out_values, las, valid_mask=cloud.nodata_mask
+        )
         self.progress_cb(100.0)
         return output_path
 
@@ -104,7 +138,9 @@ class GNOInferenceEngine:
                 try:
                     out = self._forward(x, pos, ei)
                 except Exception as exc:
-                    self.warning_cb(f"Échec sur la tuile {i + 1}/{n_tiles} : {exc}. Tuile ignorée.")
+                    self.warning_cb(
+                        f"Échec sur la tuile {i + 1}/{n_tiles} : {exc}. Tuile ignorée."
+                    )
                     continue
                 out_np = out.detach().cpu().numpy()
                 if out_np.ndim > 1:
@@ -143,7 +179,8 @@ class GNOInferenceEngine:
         if stats is not None:
             self._norm = stats
             self.message_cb(
-                f"Normalisation globale chargée (vmin={stats.vmin:.4g}, vmax={stats.vmax:.4g})."
+                f"Normalisation globale chargée "
+                f"(vmin={stats.vmin:.4g}, vmax={stats.vmax:.4g})."
             )
         else:
             self._norm = dp.compute_norm_stats(values)

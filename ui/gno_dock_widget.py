@@ -2,14 +2,26 @@
 """Panneau dockable interactif pour l'inférence GNO."""
 
 from __future__ import annotations
+
 import os
-from qgis.PyQt.QtCore import Qt
+
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QPushButton, QComboBox, QSpinBox, QLineEdit, QFileDialog,
+    QPushButton, QComboBox, QSpinBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QMessageBox, QGroupBox, QRadioButton, QButtonGroup,
 )
 from qgis.core import QgsProject, QgsRasterLayer
+
+from ..utils.file_filters import (
+    FILTER_MODEL_OPEN,
+    FILTER_POINTCLOUD_OPEN,
+    FILTER_POINTCLOUD_SAVE,
+    FILTER_RASTER_OPEN,
+    FILTER_RASTER_SAVE,
+    validate_input_path,
+    validate_model_file,
+    validate_output_path,
+)
 
 
 class GNODockWidget(QDockWidget):
@@ -38,6 +50,7 @@ class GNODockWidget(QDockWidget):
         form = QFormLayout()
         in_row = QHBoxLayout()
         self.input_edit = QLineEdit()
+        self.input_edit.setPlaceholderText("Fichier d'entrée…")
         self.btn_input = QPushButton("\u2026")
         self.btn_input.setFixedWidth(30)
         self.btn_input.clicked.connect(self._browse_input)
@@ -50,6 +63,7 @@ class GNODockWidget(QDockWidget):
 
         model_row = QHBoxLayout()
         self.model_edit = QLineEdit()
+        self.model_edit.setPlaceholderText("Modèle .pt / .pth / .ckpt…")
         self.btn_model = QPushButton("\u2026")
         self.btn_model.setFixedWidth(30)
         self.btn_model.clicked.connect(self._browse_model)
@@ -58,10 +72,11 @@ class GNODockWidget(QDockWidget):
         model_row.addWidget(self.model_edit)
         model_row.addWidget(self.btn_model)
         model_row.addWidget(self.btn_zoo)
-        form.addRow("Mod\u00e8le :", model_row)
+        form.addRow("Modèle :", model_row)
 
         out_row = QHBoxLayout()
         self.output_edit = QLineEdit()
+        self.output_edit.setPlaceholderText("Fichier de sortie…")
         self.btn_output = QPushButton("\u2026")
         self.btn_output.setFixedWidth(30)
         self.btn_output.clicked.connect(self._browse_output)
@@ -86,7 +101,7 @@ class GNODockWidget(QDockWidget):
         layout.addLayout(form)
 
         btn_row = QHBoxLayout()
-        self.btn_run = QPushButton("Lancer l'inf\u00e9rence")
+        self.btn_run = QPushButton("Lancer l'inférence")
         self.btn_run.clicked.connect(self._run)
         self.btn_cancel = QPushButton("Annuler")
         self.btn_cancel.setEnabled(False)
@@ -110,22 +125,32 @@ class GNODockWidget(QDockWidget):
 
     def _browse_input(self):
         if self.radio_raster.isChecked():
-            path, _ = QFileDialog.getOpenFileName(self, "Raster d'entr\u00e9e", "", "Rasters (*.tif *.tiff);;Tous (*.*)")
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Raster d'entrée", "", FILTER_RASTER_OPEN
+            )
         else:
-            path, _ = QFileDialog.getOpenFileName(self, "Nuage de points", "", "LAS/LAZ (*.las *.laz);;Tous (*.*)")
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Nuage de points", "", FILTER_POINTCLOUD_OPEN
+            )
         if path:
             self.input_edit.setText(path)
 
     def _browse_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Mod\u00e8le GNO", "", "PyTorch (*.pt *.pth);;Tous (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Modèle GNO", "", FILTER_MODEL_OPEN
+        )
         if path:
             self.model_edit.setText(path)
 
     def _browse_output(self):
         if self.radio_raster.isChecked():
-            path, _ = QFileDialog.getSaveFileName(self, "Raster de sortie", "", "GeoTIFF (*.tif)")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Raster de sortie", "", FILTER_RASTER_SAVE
+            )
         else:
-            path, _ = QFileDialog.getSaveFileName(self, "Nuage de points de sortie", "", "LAS (*.las);;LAZ (*.laz)")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Nuage de points de sortie", "", FILTER_POINTCLOUD_SAVE
+            )
         if path:
             self.output_edit.setText(path)
 
@@ -142,15 +167,25 @@ class GNODockWidget(QDockWidget):
         input_path = self.input_edit.text().strip()
         model_path = self.model_edit.text().strip()
         output_path = self.output_edit.text().strip()
-        if not input_path or not os.path.isfile(input_path):
-            QMessageBox.warning(self, "GNO Inference", "Fichier d'entr\u00e9e invalide.")
+        expected = "pointcloud" if self.radio_pc.isChecked() else "raster"
+
+        err, detected = validate_input_path(input_path, expected=expected)
+        if err:
+            QMessageBox.warning(self, "GNO Inference", err)
             return
-        if not model_path or not os.path.isfile(model_path):
-            QMessageBox.warning(self, "GNO Inference", "Fichier mod\u00e8le invalide.")
+
+        err = validate_model_file(model_path)
+        if err:
+            QMessageBox.warning(self, "GNO Inference", err)
             return
-        if not output_path:
-            QMessageBox.warning(self, "GNO Inference", "Chemin de sortie manquant.")
+
+        err, output_path = validate_output_path(output_path, expected)
+        if err:
+            QMessageBox.warning(self, "GNO Inference", err)
             return
+        # Répercuter l'extension auto-complétée dans le champ
+        self.output_edit.setText(output_path)
+
         if self.radio_pc.isChecked():
             from ..utils.dependencies import missing_las_dependencies
             missing = missing_las_dependencies()
@@ -159,12 +194,18 @@ class GNODockWidget(QDockWidget):
                 dlg = DependencyInstallDialog(missing, parent=self)
                 dlg.exec_()
                 return
+
         from ..processing.gno_processor import GNOProcessor
+
         device_str = "gpu" if self.device_combo.currentIndex() == 1 else "cpu"
         self._processor = GNOProcessor(
-            model_path=model_path, input_path=input_path, output_path=output_path,
-            k=self.k_spin.value(), batch_size=self.batch_spin.value(),
-            device_str=device_str, las_dimension=self.las_dim_edit.text().strip() or "z",
+            model_path=model_path,
+            input_path=input_path,
+            output_path=output_path,
+            k=self.k_spin.value(),
+            batch_size=self.batch_spin.value(),
+            device_str=device_str,
+            las_dimension=self.las_dim_edit.text().strip() or "z",
             parent=self,
         )
         self._processor.progress.connect(self.progress.setValue)
@@ -172,21 +213,22 @@ class GNODockWidget(QDockWidget):
         self._processor.warning.connect(lambda w: self._log(f"\u26a0 {w}"))
         self._processor.finished_ok.connect(self._on_finished)
         self._processor.failed.connect(self._on_failed)
+
         self.btn_run.setEnabled(False)
         self.btn_cancel.setEnabled(True)
         self.progress.setValue(0)
-        self._log("D\u00e9marrage de l'inf\u00e9rence\u2026")
+        self._log("Démarrage de l'inférence\u2026")
         self._processor.start()
 
     def _cancel(self):
         if self._processor is not None:
             self._processor.cancel()
-            self._log("Annulation demand\u00e9e\u2026")
+            self._log("Annulation demandée\u2026")
 
     def _on_finished(self, path):
         self.btn_run.setEnabled(True)
         self.btn_cancel.setEnabled(False)
-        self._log(f"\u2713 Termin\u00e9 : {path}")
+        self._log(f"\u2713 Terminé : {path}")
         self._load_result(path)
 
     def _on_failed(self, msg):
@@ -196,11 +238,17 @@ class GNODockWidget(QDockWidget):
         QMessageBox.warning(self, "GNO Inference", msg)
 
     def _load_result(self, path):
-        ext = os.path.splitext(path)[1].lower()
-        if ext in (".tif", ".tiff"):
+        from ..utils.file_filters import is_raster_path, is_pointcloud_path
+
+        if is_raster_path(path):
             layer = QgsRasterLayer(path, os.path.basename(path))
             if layer.isValid():
                 QgsProject.instance().addMapLayer(layer)
-                self._log("Raster ajout\u00e9 au projet.")
-        elif ext in (".las", ".laz"):
-            self._log("Nuage de points \u00e9crit. Chargez-le manuellement.")
+                self._log("Raster ajouté au projet.")
+            else:
+                self._log("Raster écrit mais non chargeable dans QGIS.")
+        elif is_pointcloud_path(path):
+            self._log(
+                "Nuage de points écrit. Chargez-le manuellement "
+                "(Couche \u2192 Ajouter une couche de nuage de points)."
+            )
