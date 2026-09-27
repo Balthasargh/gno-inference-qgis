@@ -1,0 +1,5 @@
+torch
+neuraloperator
+rasterio
+scipy
+numpy
