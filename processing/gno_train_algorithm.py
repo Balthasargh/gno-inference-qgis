@@ -11,6 +11,12 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QCoreApplication
 
+from ..utils.file_filters import (
+    PROC_FILTER_MODEL_OUT,
+    validate_data_dir,
+    validate_output_path,
+)
+
 
 class GNOTrainAlgorithm(QgsProcessingAlgorithm):
     DATA_DIR = "DATA_DIR"
@@ -46,7 +52,7 @@ class GNOTrainAlgorithm(QgsProcessingAlgorithm):
         return self.tr(
             "Entraîne un modèle GINO sur des paires de rasters GeoTIFF "
             "alignés (xxx_input.tif / xxx_target.tif) placés dans un dossier.\n\n"
-            "Sauvegarde le meilleur modèle (.pt) et un fichier .norm.json "
+            "Sauvegarde le meilleur modèle (.pt / .pth) et un fichier .norm.json "
             "de statistiques de normalisation."
         )
 
@@ -132,8 +138,8 @@ class GNOTrainAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFileDestination(
                 self.OUTPUT_MODEL,
-                self.tr("Modèle de sortie (.pt)"),
-                fileFilter="PyTorch (*.pt *.pth)",
+                self.tr("Modèle de sortie (.pt / .pth)"),
+                fileFilter=PROC_FILTER_MODEL_OUT,
             )
         )
 
@@ -152,10 +158,13 @@ class GNOTrainAlgorithm(QgsProcessingAlgorithm):
         device_str = "gpu" if device_idx == 1 else "cpu"
         output_model = self.parameterAsString(parameters, self.OUTPUT_MODEL, context)
 
-        if not data_dir:
-            raise QgsProcessingException(self.tr("Dossier de données manquant."))
-        if not output_model:
-            raise QgsProcessingException(self.tr("Chemin du modèle de sortie manquant."))
+        err = validate_data_dir(data_dir)
+        if err:
+            raise QgsProcessingException(self.tr(err))
+
+        err, output_model = validate_output_path(output_model or "", "model")
+        if err:
+            raise QgsProcessingException(self.tr(err))
 
         engine = GNOTrainingEngine(
             data_dir=data_dir,

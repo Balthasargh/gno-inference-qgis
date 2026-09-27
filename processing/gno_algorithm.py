@@ -14,6 +14,14 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QCoreApplication
 
+from ..utils.file_filters import (
+    PROC_FILTER_MODEL,
+    PROC_FILTER_POINTCLOUD,
+    validate_input_path,
+    validate_model_file,
+    validate_output_path,
+)
+
 
 class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
     INPUT_RASTER = "INPUT_RASTER"
@@ -49,7 +57,9 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
             "Applique un modèle Graph Neural Operator (GNO/GINO) pré-entraîné "
             "sur un raster (GeoTIFF) ou un nuage de points LAS/LAZ.\n\n"
             "Renseignez SOIT une entrée raster + sortie raster, "
-            "SOIT une entrée nuage de points + sortie nuage de points."
+            "SOIT une entrée nuage de points + sortie nuage de points.\n\n"
+            "Extensions modèle : .pt, .pth, .ckpt\n"
+            "Extensions nuage de points : .las, .laz"
         )
 
     def initAlgorithm(self, config=None):
@@ -65,7 +75,7 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
                 self.INPUT_POINTCLOUD,
                 self.tr("Nuage de points d'entrée LAS/LAZ (optionnel)"),
                 optional=True,
-                fileFilter="LAS/LAZ (*.las *.laz);;Tous les fichiers (*.*)",
+                fileFilter=PROC_FILTER_POINTCLOUD,
             )
         )
         self.addParameter(
@@ -79,8 +89,8 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFile(
                 self.MODEL,
-                self.tr("Fichier du modèle (.pt / .pth)"),
-                fileFilter="PyTorch (*.pt *.pth);;Tous les fichiers (*.*)",
+                self.tr("Fichier du modèle (.pt / .pth / .ckpt)"),
+                fileFilter=PROC_FILTER_MODEL,
             )
         )
         self.addParameter(
@@ -138,18 +148,39 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
         device_str = "gpu" if device_idx == 1 else "cpu"
         las_dim = self.parameterAsString(parameters, self.LAS_DIMENSION, context) or "z"
 
+        # --- Validation modèle ---
+        err = validate_model_file(model_path)
+        if err:
+            raise QgsProcessingException(self.tr(err))
+
+        # --- Choix entrée / sortie ---
         if raster_layer is not None and raster_layer.isValid():
             input_path = raster_layer.source()
-            output_path = self.parameterAsOutputLayer(parameters, self.OUTPUT_RASTER, context)
+            # Certaines sources QGIS sont des URI (vs chemin fichier)
+            if input_path and not input_path.startswith("/"):
+                # Windows drive ou URI GDAL — on laisse passer si le layer est valide
+                pass
+            output_path = self.parameterAsOutputLayer(
+                parameters, self.OUTPUT_RASTER, context
+            )
             if not output_path:
                 raise QgsProcessingException(self.tr("Sortie raster non renseignée."))
+            err, output_path = validate_output_path(output_path, "raster")
+            if err:
+                raise QgsProcessingException(self.tr(err))
+            input_kind = "raster"
         elif pc_path:
+            err, detected = validate_input_path(pc_path, expected="pointcloud")
+            if err:
+                raise QgsProcessingException(self.tr(err))
             input_path = pc_path
-            output_path = self.parameterAsString(parameters, self.OUTPUT_POINTCLOUD, context)
-            if not output_path:
-                raise QgsProcessingException(
-                    self.tr("Sortie nuage de points non renseignée.")
-                )
+            output_path = self.parameterAsString(
+                parameters, self.OUTPUT_POINTCLOUD, context
+            )
+            err, output_path = validate_output_path(output_path or "", "pointcloud")
+            if err:
+                raise QgsProcessingException(self.tr(err))
+            input_kind = "pointcloud"
         else:
             raise QgsProcessingException(
                 self.tr(
@@ -157,9 +188,6 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
                     "soit un nuage de points LAS/LAZ."
                 )
             )
-
-        if not model_path:
-            raise QgsProcessingException(self.tr("Fichier modèle manquant."))
 
         engine = GNOInferenceEngine(
             model_path=model_path,
@@ -179,6 +207,6 @@ class GNOInferenceAlgorithm(QgsProcessingAlgorithm):
         except Exception as exc:
             raise QgsProcessingException(str(exc))
 
-        if raster_layer is not None and raster_layer.isValid():
+        if input_kind == "raster":
             return {self.OUTPUT_RASTER: result}
         return {self.OUTPUT_POINTCLOUD: result}
