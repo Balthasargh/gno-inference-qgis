@@ -4,9 +4,9 @@
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterFile,
+    QgsProcessingParameterFileDestination,
     QgsProcessingParameterNumber,
     QgsProcessingParameterEnum,
-    QgsProcessingParameterFolder,
     QgsProcessingException,
 )
 from qgis.PyQt.QtCore import QCoreApplication
@@ -52,62 +52,87 @@ class GNOTrainAlgorithm(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         self.addParameter(
-            QgsProcessingParameterFolder(
+            QgsProcessingParameterFile(
                 self.DATA_DIR,
                 self.tr("Dossier de données (paires input/target)"),
+                behavior=QgsProcessingParameterFile.Folder,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.EPOCHS, self.tr("Nombre d'epochs"),
-                type=QgsProcessingParameterNumber.Integer, defaultValue=100, minValue=1,
+                self.EPOCHS,
+                self.tr("Nombre d'epochs"),
+                type=QgsProcessingParameterNumber.Integer,
+                defaultValue=100,
+                minValue=1,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.LR, self.tr("Taux d'apprentissage"),
-                type=QgsProcessingParameterNumber.Double, defaultValue=0.001, minValue=1e-6,
+                self.LR,
+                self.tr("Taux d'apprentissage"),
+                type=QgsProcessingParameterNumber.Double,
+                defaultValue=0.001,
+                minValue=1e-6,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.K, self.tr("k (voisins du graphe)"),
-                type=QgsProcessingParameterNumber.Integer, defaultValue=8, minValue=1,
+                self.K,
+                self.tr("k (voisins du graphe)"),
+                type=QgsProcessingParameterNumber.Integer,
+                defaultValue=8,
+                minValue=1,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.BATCH_SIZE, self.tr("Taille de lot (scènes)"),
-                type=QgsProcessingParameterNumber.Integer, defaultValue=1, minValue=1,
+                self.BATCH_SIZE,
+                self.tr("Taille de lot (scènes)"),
+                type=QgsProcessingParameterNumber.Integer,
+                defaultValue=1,
+                minValue=1,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.VAL_SPLIT, self.tr("Proportion de scènes en validation"),
-                type=QgsProcessingParameterNumber.Double, defaultValue=0.15, minValue=0.0, maxValue=0.5,
+                self.VAL_SPLIT,
+                self.tr("Proportion de scènes en validation"),
+                type=QgsProcessingParameterNumber.Double,
+                defaultValue=0.15,
+                minValue=0.0,
+                maxValue=0.5,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.PATIENCE, self.tr("Patience (arrêt anticipé)"),
-                type=QgsProcessingParameterNumber.Integer, defaultValue=15, minValue=1,
+                self.PATIENCE,
+                self.tr("Patience (arrêt anticipé)"),
+                type=QgsProcessingParameterNumber.Integer,
+                defaultValue=15,
+                minValue=1,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.SEED, self.tr("Graine aléatoire"),
-                type=QgsProcessingParameterNumber.Integer, defaultValue=42,
+                self.SEED,
+                self.tr("Graine aléatoire"),
+                type=QgsProcessingParameterNumber.Integer,
+                defaultValue=42,
             )
         )
         self.addParameter(
             QgsProcessingParameterEnum(
-                self.DEVICE, self.tr("Device"), options=["CPU", "GPU"], defaultValue=0,
+                self.DEVICE,
+                self.tr("Device"),
+                options=["CPU", "GPU"],
+                defaultValue=0,
             )
         )
         self.addParameter(
-            QgsProcessingParameterFile(
-                self.OUTPUT_MODEL, self.tr("Modèle de sortie (.pt)"),
-                behavior=QgsProcessingParameterFile.File,
+            QgsProcessingParameterFileDestination(
+                self.OUTPUT_MODEL,
+                self.tr("Modèle de sortie (.pt)"),
                 fileFilter="PyTorch (*.pt *.pth)",
             )
         )
@@ -127,13 +152,21 @@ class GNOTrainAlgorithm(QgsProcessingAlgorithm):
         device_str = "gpu" if device_idx == 1 else "cpu"
         output_model = self.parameterAsString(parameters, self.OUTPUT_MODEL, context)
 
+        if not data_dir:
+            raise QgsProcessingException(self.tr("Dossier de données manquant."))
         if not output_model:
             raise QgsProcessingException(self.tr("Chemin du modèle de sortie manquant."))
 
         engine = GNOTrainingEngine(
-            data_dir=data_dir, output_path=output_model,
-            epochs=epochs, lr=lr, k=k, batch_size=batch_size,
-            val_split=val_split, patience=patience, seed=seed,
+            data_dir=data_dir,
+            output_path=output_model,
+            epochs=epochs,
+            lr=lr,
+            k=k,
+            batch_size=batch_size,
+            val_split=val_split,
+            patience=patience,
+            seed=seed,
             device_str=device_str,
             progress_cb=lambda p: feedback.setProgress(p),
             message_cb=lambda m: feedback.pushInfo(m),

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# QGIS
+*.qgs~
+*.qgz~
+.qgis2/
+
+# Models & data (ne pas versionner les poids / données volumineuses)
+*.pt
+*.pth
+*.ckpt
+*.norm.json
+data/
+*.tif
+*.tiff
+*.las
+*.laz
+
+# Logs / cache
+*.log
+.cache/
